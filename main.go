@@ -1,26 +1,37 @@
 package main
 
 import (
+	"chirpy/internal/database"
 	"database/sql"
 	"log"
 	"net/http"
 	"os"
 	"sync/atomic"
+	"time"
 
-	"chirpy/internal/database"
-
+	"github.com/google/uuid"
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
+	platform       string
+}
+
+type User struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
 }
 
 func main() {
 	const filepathRoot = "."
 	const port = "8080"
 	dbURL := os.Getenv("DB_URL")
+	godotenv.Load()
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatalf("Failed to connect to database. Err: %s", err)
@@ -30,6 +41,7 @@ func main() {
 	apiCfg := apiConfig{
 		fileserverHits: atomic.Int32{},
 		db:             database.New(db),
+		platform:       os.Getenv("PLATFORM"),
 	}
 
 	mux := http.NewServeMux()
@@ -39,7 +51,7 @@ func main() {
 
 	mux.HandleFunc("GET /api/healthz", handlerReadiness)
 	mux.HandleFunc("POST /api/validate_chirp", handlerChirpsValidate)
-
+	mux.HandleFunc("POST /api/users", apiCfg.usersHandler)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.fileserverHitsHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.fileserverResetHandler)
 
