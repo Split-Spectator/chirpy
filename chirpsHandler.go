@@ -2,7 +2,9 @@ package main
 
 import (
 	"chirpy/internal/database"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -96,4 +98,28 @@ func (cfg *apiConfig) getAllChirpsHandler(w http.ResponseWriter, r *http.Request
 		})
 	}
 	respondWithJSON(w, http.StatusOK, jsonChirps)
+}
+
+func (cfg *apiConfig) getOneChirpHandler(w http.ResponseWriter, r *http.Request) {
+	parsedID, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid Chirp ID", err)
+	}
+
+	oneChirp, err := cfg.db.GetOneChirps(r.Context(), parsedID)
+	if errors.Is(err, sql.ErrNoRows) {
+		respondWithError(w, http.StatusNotFound, "ID not Found", err)
+	} else if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "error fetching chirp by ID", err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, Chirp{
+		ID:        oneChirp.ID,
+		CreatedAt: oneChirp.CreatedAt,
+		UpdatedAt: oneChirp.UpdatedAt,
+		Body:      oneChirp.Body,
+		UserId:    oneChirp.UserID,
+	})
+
 }

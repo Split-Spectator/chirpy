@@ -55,6 +55,7 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", apiCfg.fileserverHitsHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.fileserverResetHandler)
 	mux.HandleFunc("GET /api/chirps", apiCfg.getAllChirpsHandler)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.getOneChirpHandler)
 
 	srv := &http.Server{
 		Addr:    ":" + port,
