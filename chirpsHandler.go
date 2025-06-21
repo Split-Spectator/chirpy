@@ -53,7 +53,7 @@ func (cfg *apiConfig) postChirpsHandler(w http.ResponseWriter, r *http.Request) 
 	chirp, err := cfg.db.CreateChirp(r.Context(), database.CreateChirpParams{Body: cleaned, UserID: params.UserID})
 	if err != nil {
 		fmt.Println(err)
-		respondWithError(w, 500, err.Error(), err)
+		respondWithError(w, http.StatusInternalServerError, err.Error(), err)
 		return
 	}
 
@@ -76,4 +76,24 @@ func getCleanedBody(body string, badWords map[string]struct{}) string {
 	}
 	cleaned := strings.Join(words, " ")
 	return cleaned
+}
+
+func (cfg *apiConfig) getAllChirpsHandler(w http.ResponseWriter, r *http.Request) {
+	chirps, err := cfg.db.GetAllChirps(r.Context())
+	if err != nil {
+		fmt.Println(err)
+		respondWithError(w, http.StatusInternalServerError, "error fetching chirps", err)
+		return
+	}
+	var jsonChirps []Chirp
+	for i := range chirps {
+		jsonChirps = append(jsonChirps, Chirp{
+			ID:        chirps[i].ID,
+			CreatedAt: chirps[i].CreatedAt,
+			UpdatedAt: chirps[i].UpdatedAt,
+			Body:      chirps[i].Body,
+			UserId:    chirps[i].UserID,
+		})
+	}
+	respondWithJSON(w, http.StatusOK, jsonChirps)
 }
