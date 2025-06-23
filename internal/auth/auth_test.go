@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -90,5 +91,14 @@ func TestValidateJWT_InvalidToken(t *testing.T) {
 	_, err := ValidateJWT(invalidToken, secret)
 	if err == nil {
 		t.Error("ValidateJWT did not fail for invalid token")
+	}
+}
+
+func TestGetBearerToken(t *testing.T) {
+	headers := http.Header{}
+	headers["Authorization"] = []string{"Bearer 12345"}
+	tokenString, err := GetBearerToken(headers)
+	if err != nil || tokenString != "12345" {
+		t.Errorf("Failed to get Bearer token. Err: %v", err)
 	}
 }
