@@ -3,17 +3,21 @@ package main
 import (
 	"chirpy/internal/auth"
 	"chirpy/internal/database"
+	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func (cfg *apiConfig) usersHandler(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Email            string `json:"email"`
-		Password         string `json:"password"`
-		ExpiresInSeconds int    `json:"expires_in_seconds"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -54,7 +58,6 @@ func (cfg *apiConfig) usersLoginHandler(w http.ResponseWriter, r *http.Request) 
 		Email            string `json:"email"`
 		ExpiresInSeconds int    `json:"expires_in_seconds"`
 	}
-
 	type response struct {
 		User
 		Token        string `json:"token"`
@@ -82,16 +85,29 @@ func (cfg *apiConfig) usersLoginHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	expirationTime := time.Hour
-	if params.ExpiresInSeconds > 0 && params.ExpiresInSeconds < 3600 {
-		expirationTime = time.Duration(params.ExpiresInSeconds) * time.Second
+	refreshTokenString, err := auth.MakeRefreshToken()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create refresh token", err)
+		return
+	}
+
+	refreshTokenExpiry := time.Now().Add(60 * 24 * time.Hour)
+	_, err = cfg.db.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
+		Token:     refreshTokenString,
+		UserID:    user.ID,
+		ExpiresAt: refreshTokenExpiry,
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't store refresh token", err)
+		return
 	}
 
 	accessToken, err := auth.MakeJWT(
 		user.ID,
 		cfg.secret,
-		expirationTime,
+		1*time.Hour,
 	)
+
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't create access JWT", err)
 		return
@@ -104,6 +120,86 @@ func (cfg *apiConfig) usersLoginHandler(w http.ResponseWriter, r *http.Request) 
 			UpdatedAt: user.UpdatedAt,
 			Email:     user.Email,
 		},
-		Token: accessToken,
+		Token:        accessToken,
+		RefreshToken: refreshTokenString,
 	})
+}
+
+func (cfg *apiConfig) createRefreshToken(c context.Context, userID uuid.UUID) (string, error) {
+	const refreshTokenValidity = 60 * (24 * time.Hour)
+	rTokenString, err := auth.MakeRefreshToken()
+	if err != nil {
+		return "", err
+	}
+	params := database.CreateRefreshTokenParams{
+		Token:     rTokenString,
+		UserID:    userID,
+		ExpiresAt: time.Now().Add(refreshTokenValidity),
+	}
+	_, err = cfg.db.CreateRefreshToken(c, params)
+	if err != nil {
+		return "", err
+	}
+	return rTokenString, nil
+}
+
+func (cfg *apiConfig) handlerRefresh(w http.ResponseWriter, r *http.Request) {
+	rTokenString, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	refreshToken, err := cfg.db.GetRefreshToken(r.Context(), rTokenString)
+	if err != nil || !isRefreshTokenValid(refreshToken) {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	user, err := cfg.db.GetUserFromRefreshToken(r.Context(), rTokenString)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	jwtTokenString, err := auth.MakeJWT(user.ID.UUID, cfg.secret, 1*time.Hour)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	type RespBody struct {
+		Token string `json:"token"`
+	}
+	respBody := RespBody{Token: jwtTokenString}
+
+	respondWithJSON(w, http.StatusOK, respBody)
+}
+
+func isExpired(expiresAt time.Time) bool {
+
+	return expiresAt.Compare(time.Now()) == -1
+}
+
+func isRefreshTokenValid(refreshToken database.RefreshToken) bool {
+	return !(isExpired(refreshToken.ExpiresAt) || refreshToken.RevokedAt.Valid)
+}
+
+func (cfg *apiConfig) handlerRevoke(w http.ResponseWriter, r *http.Request) {
+	rTokenString, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	err = cfg.db.Revoke(r.Context(), rTokenString)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// To prevent token probing
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
