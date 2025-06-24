@@ -258,6 +258,11 @@ func (cfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Request) 
 }
 
 func (cfg *apiConfig) handlerMakeRed(w http.ResponseWriter, r *http.Request) {
+	apiKey, err := auth.GetAPIKey(r.Header)
+	if err != nil || apiKey != cfg.polkaKey {
+		w.WriteHeader(401)
+		return
+	}
 
 	type DataStruct struct {
 		UserID string `json:"user_id"`
@@ -268,7 +273,7 @@ func (cfg *apiConfig) handlerMakeRed(w http.ResponseWriter, r *http.Request) {
 	}
 	var expectedReq ExpectedReq
 	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&expectedReq)
+	err = decoder.Decode(&expectedReq)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
