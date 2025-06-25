@@ -6,7 +6,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
+
+	//"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -90,23 +91,47 @@ func getCleanedBody(body string, badWords map[string]struct{}) string {
 }
 
 func (cfg *apiConfig) getAllChirpsHandler(w http.ResponseWriter, r *http.Request) {
-	chirps, err := cfg.db.GetAllChirps(r.Context())
-	if err != nil {
-		fmt.Println(err)
-		respondWithError(w, http.StatusInternalServerError, "error fetching chirps", err)
-		return
+	authorID := r.URL.Query().Get("author_id")
+	var chirpsfromDB []database.Chirp
+	var err error
+
+	if authorID != "" {
+		id, parseErr := uuid.Parse(authorID)
+		if parseErr != nil {
+			respondWithError(w, http.StatusBadRequest, "invalid author_id", parseErr)
+			return
+		}
+		chirpsfromDB, err = cfg.db.GetChirpsByID(r.Context(), id)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			respondWithError(w, http.StatusInternalServerError, "error fetching chirps", err)
+			return
+		}
+	} else {
+		chirpsfromDB, err = cfg.db.GetAllChirps(r.Context())
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "error fetching chirps", err)
+			return
+		}
 	}
-	var jsonChirps []Chirp
-	for i := range chirps {
-		jsonChirps = append(jsonChirps, Chirp{
-			ID:        chirps[i].ID,
-			CreatedAt: chirps[i].CreatedAt,
-			UpdatedAt: chirps[i].UpdatedAt,
-			Body:      chirps[i].Body,
-			UserId:    chirps[i].UserID,
+	respondWithJSON(w, http.StatusOK, chirpModelsToAPIChirps(chirpsfromDB))
+}
+
+func chirpModelsToAPIChirps(models []database.Chirp) []Chirp {
+	apiChirps := make([]Chirp, 0, len(models))
+	for _, m := range models {
+		apiChirps = append(apiChirps, Chirp{
+			ID:        m.ID,
+			CreatedAt: m.CreatedAt,
+			UpdatedAt: m.UpdatedAt,
+			Body:      m.Body,
+			UserId:    m.UserID,
 		})
 	}
-	respondWithJSON(w, http.StatusOK, jsonChirps)
+	return apiChirps
 }
 
 func (cfg *apiConfig) getOneChirpHandler(w http.ResponseWriter, r *http.Request) {
